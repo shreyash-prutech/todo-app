@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -13,6 +14,21 @@ app = FastAPI(
     title="Todo API for QIF Testing",
     description="A simple Todo API designed for testing scenarios and workflows in QIF.",
     version="1.0.0"
+)
+
+# Configure CORS
+origins = [
+    "http://localhost",
+    "http://localhost:5173", # Default Vite port
+    "http://127.0.0.1:5173",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Dependency to get the database session
