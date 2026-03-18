@@ -16,20 +16,20 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configure CORS
-origins = [
-    "http://localhost",
-    "http://localhost:5173", # Default Vite port
-    "http://127.0.0.1:5173",
-]
-
+# Configure CORS — allow all origins so the app works inside QIF sandbox
+# containers where the hostname is dynamically assigned.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/")
+def root():
+    return {"status": "ok", "app": "Todo API", "version": "1.0.0"}
+
 
 # Dependency to get the database session
 def get_db():

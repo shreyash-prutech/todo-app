@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react'
 import './App.css'
 
-const API_URL = 'http://localhost:8000/todos/';
+// Resolve API URL relative to the current host so it works both locally
+// and inside QIF sandbox containers where the hostname is dynamic.
+const API_URL = (() => {
+  const host = window.location.hostname;
+  const port = window.location.port === '5173' ? '8000' : window.location.port;
+  return `http://${host}:${port}/todos/`;
+})();
 
 function App() {
   const [todos, setTodos] = useState([])
