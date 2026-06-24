@@ -1,23 +1,122 @@
-version: '3.8'
+version: '3.9'
 
 services:
-  api:
-    build: .
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: app
+    environment:
+      FLASK_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/app
+      # Migration plan support:
+      # 1) Keep current Flask app as the source of truth.
+      # 2) Add golden-master contract tests against Flask before any cutover.
+      # 3) Upgrade dependencies in-place while preserving existing behavior.
+      # 4) Introduce a parity FastAPI layer behind the same compose network.
+      # 5) Cut over routes slice-by-slice only after contract parity is proven.
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUNBUFFERED: '1'
     ports:
-      - "8000:8000"
+      - '8000:8000'
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
       - .:/app
-    environment:
-      - PYTHONUNBUFFERED=1
+    command: >
+      sh -c "
+        if [ -f /app/run.sh ]; then
+          /app/run.sh;
+        elif [ -f /app/app.py ]; then
+          python app.py;
+        else
+          flask run --host=0.0.0.0 --port=8000;
+        fi
+      "
+    healthcheck:
+      test: ['CMD-SHELL', 'python - <<\"PY\"\nimport urllib.request, sys\ntry:\n    urllib.request.urlopen(\"http://127.0.0.1:8000/\", timeout=2)\n    sys.exit(0)\nexcept Exception:\n    sys.exit(1)\nPY']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
-  frontend:
-    build: ./frontend
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+  # Parity FastAPI service for incremental migration.
+  # Keep disabled by default until golden-master contract tests pass.
+  fastapi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fastapi
     environment:
-      - CHOKIDAR_USEPOLLING=true
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/app
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUNBUFFERED: '1'
+    ports:
+      - '8001:8000'
     depends_on:
-      - api
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    command: >
+      sh -c "
+        if [ -f /app/run_fastapi.sh ]; then
+          /app/run_fastapi.sh;
+        else
+          uvicorn main:app --host 0.0.0.0 --port 8000 --reload;
+        fi
+      "
+    profiles:
+      - parity
+
+  db:
+    image: postgres:16-alpine
+    container_name: db
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d app']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # Optional contract-test runner for golden-master verification.
+  contract-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: contract-tests
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/app
+      FLASK_BASE_URL: http://app:8000
+      FASTAPI_BASE_URL: http://fastapi:8000
+    depends_on:
+      app:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      fastapi:
+        condition: service_started
+    volumes:
+      - .:/app
+    command: >
+      sh -c "
+        if [ -f /app/tests/contract/run_contract_tests.sh ]; then
+          /app/tests/contract/run_contract_tests.sh;
+        else
+          pytest -q tests/contract;
+        fi
+      "
+    profiles:
+      - tests
+
+volumes:
+  pgdata:
